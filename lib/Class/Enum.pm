@@ -94,7 +94,7 @@ Class::Enum - Automated enum-like class generation
   package My::UserType;
   use Class::Enum (
     key    => [ qw( id name ) ],
-    const  => sub { lc $_ },
+    const  => sub { uc $_ },
     values => 1,
     {
        id   => 1,
