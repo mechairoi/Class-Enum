@@ -9,67 +9,74 @@ sub import {
     my %args;
     while (my $v = shift @_) {
         if (ref $v) {
-            push @{$args{defs} ||= []}, $v;
+            push @{$args{_defs} ||= []}, $v;
         } else {
             $args{$v} = shift @_;
         }
     }
     my %key_ctor = (
-        defs  => \&_mk_values,
-        key   => \&_mk_keys,
+        _defs => \&_mk_definition,
+        key   => \&_mk_constructor,
     );
     my $pkg_info = { pkg => $pkg };
-    for my $key (qw(defs key)) {
+    for my $key (qw(_defs key)) {
         if (defined $args{$key}) {
             Carp::croak "value of the '$key' parameter should be an arrayref"
                 unless ref($args{$key}) eq 'ARRAY';
             $key_ctor{$key}->($pkg_info, $args{$key});
         }
     }
-    _mk_values_sub($pkg_info) if $args{values};
+    _mk_constant($pkg_info, $args{const}) if $args{const};
+    _mk_values($pkg_info) if $args{values};
     1;
 }
 
-sub _mk_values {
+sub _mk_definition {
     my ($pkg_info, $defs) = @_;
     $pkg_info->{values} = [ map {  bless $_, $pkg_info->{pkg} } @$defs ];
 }
 
-sub _mk_keys {
-    my ($pkg_info, $ns) = @_;
-    for my $n (@$ns) {
+sub _mk_constructor {
+    my ($pkg_info, $keys) = @_;
+    for my $key (@$keys) {
         no strict 'refs';
-        *{$pkg_info->{pkg} . '::from_' . $n} = __m_key($pkg_info, $n);
+        *{$pkg_info->{pkg} . '::from_' . $key} = __m_constructor($pkg_info, $key);
     }
 }
 
-sub _mk_values_sub {
+sub _mk_values {
     my ($pkg_info) = @_;
     no strict 'refs';
     *{$pkg_info->{pkg} . '::values'} = __m_values($pkg_info);
 }
 
-sub _mk_constants {
-    my ($pkg_info, $n) = @_;
+sub _mk_constant {
+    my ($pkg_info, $code) = @_;
     for my $v ( @{$pkg_info->{values} || []} ) {
+        my $name = $pkg_info->{pkg} . '::' . do { local $_ = $v; $code->($v) };
         no strict 'refs';
-        *{$pkg_info->{pkg} . '::' . $v->{$n} } = sub () { $v };
+        *{$name} = sub () { use strict 'refs'; $v };
     }
 }
 
-sub __m_key {
-    my ($pkg_info, $n) = @_;
+sub __m_constructor {
+    my ($pkg_info, $k) = @_;
     for my $v ( @{$pkg_info->{values} || []} ) {
-        Carp::croak "Duplicate entry @{[$v->{$n}]} for key '$n' at @{[$pkg_info->{pkg}]}"
-              if $pkg_info->{'form_' . $n}->{$v->{$n}};
-        $pkg_info->{'form_' . $n}->{$v->{$n}} = $v;
+        Carp::croak "Duplicate entry @{[$v->{$k}]} for key '$k' at @{[$pkg_info->{pkg}]}"
+              if $pkg_info->{'form_' . $k}->{$v->{$k}};
+        $pkg_info->{'form_' . $k}->{$v->{$k}} = $v;
     }
-    sub { $pkg_info->{'form_' . $n}->{defined $_[1] ? $_[1] : ''}; };
+    sub {
+        my ($class, $name) = @_;
+        defined $_[1] or Carp::croak 'missing arguments';
+        $pkg_info->{'form_' . $k}->{$name}
+            or Carp::croak "$class has no instance whose `$k` is `$name`";
+    };
 }
 
 sub __m_values {
     my ($pkg_info) = @_;
-    sub () {
+    sub {
         wantarray ? @{$pkg_info->{values} || []} : $pkg_info->{values};
     },
 }
@@ -87,6 +94,7 @@ Class::Enum - Automated enum-like class generation
   package My::UserType;
   use Class::Enum (
     key    => [ qw( id name ) ],
+    const  => sub { lc $_ },
     values => 1,
     {
        id   => 1,
@@ -98,8 +106,10 @@ Class::Enum - Automated enum-like class generation
     }
   );
 
+
   my $twitter = My::UserType->from_id(1); # +{ id => 1, name => 'twitter' }
-  My::UserType->from_name('twitter')      # reference equal to $twitter
+  My::UserType->from_name('twitter')      # same
+  UserType::TWITTER()                     # same
 
   @all_types = My::UserType->values;      # array of instances by defined order
   $all_types = My::UserType->values;      # arrayref of instances by defined order
@@ -128,4 +138,3 @@ it under the same terms as Perl itself.
 =back
 
 =cut
-
